@@ -1,108 +1,63 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LayerZero 批量交易查询</title>
+  <meta charset="UTF-8" />
+  <title>LayerZero 批量查询</title>
   <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-      background: #f9f9f9;
-    }
-    textarea, button {
-      width: 100%;
-      margin: 10px 0;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 20px;
-      background: white;
-    }
-    th, td {
-      border: 1px solid #ddd;
-      padding: 8px;
-      text-align: left;
-    }
-    th {
-      background: #eee;
-    }
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    textarea { width: 100%; height: 120px; }
+    button { margin: 10px 0; padding: 10px 20px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    td, th { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
   </style>
 </head>
 <body>
-  <h2>LayerZero 批量交易记录查询</h2>
-  <textarea id="addressList" placeholder="请输入地址，每行一个"></textarea>
-  <button onclick="query()">开始查询</button>
-  <div id="result"></div>
+  <h2>LayerZero 批量交易查询</h2>
+  <p>每行输入一个钱包地址：</p>
+  <textarea id="addresses"></textarea>
+  <br>
+  <button onclick="query()">查询</button>
+
+  <div id="results"></div>
 
   <script>
-    async function fetchTransactions(address) {
-      const url = `https://layerzeroscan.com/api/trpc/messages.list?input=${encodeURIComponent(JSON.stringify({
-        filters: {
-          address,
-          stage: "mainnet",
-          created: {}
-        }
-      }))}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      return json.result?.data?.messages || [];
-    }
-
-    function formatDate(timestamp) {
+    function getWeek(timestamp) {
       const date = new Date(timestamp * 1000);
-      return date.toISOString().split("T")[0];
-    }
-
-    function getWeek(dateString) {
-      const date = new Date(dateString);
-      const firstDay = new Date(date.getFullYear(), 0, 1);
-      const pastDays = Math.floor((date - firstDay) / (24 * 60 * 60 * 1000));
-      return `第 ${Math.ceil((pastDays + firstDay.getDay() + 1) / 7)} 周`;
+      const onejan = new Date(date.getFullYear(), 0, 1);
+      return `${date.getFullYear()} 第${Math.ceil((((date - onejan) / 86400000) + onejan.getDay() + 1) / 7)}周`;
     }
 
     async function query() {
-      const addresses = document.getElementById("addressList").value.trim().split(/\n+/);
-      const resultDiv = document.getElementById("result");
-      resultDiv.innerHTML = "查询中...";
+      const addresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '查询中...';
 
-      let html = "";
+      const table = document.createElement('table');
+      table.innerHTML = `<tr><th>地址</th><th>交易数量</th><th>最后活跃</th><th>活跃周数</th></tr>`;
 
-      for (const address of addresses) {
-        const txs = await fetchTransactions(address);
-        const weeks = new Set();
-        let lastActive = "无记录";
+      for (const addr of addresses) {
+        try {
+          const res = await fetch(`https://layer-zero-8po0p25nb-7ccccc21xs-projects.vercel.app/api/proxy?address=${addr}`);
+          const json = await res.json();
+          const messages = json.result?.data?.messages || [];
 
-        if (txs.length > 0) {
-          const dates = txs.map(tx => formatDate(tx.created));
-          lastActive = dates[0];
-          dates.forEach(date => weeks.add(getWeek(date)));
-        }
+          const count = messages.length;
+          const weeks = new Set(messages.map(m => getWeek(m.created)));
+          const lastActive = messages[0] ? new Date(messages[0].created * 1000).toLocaleString() : '-';
 
-        html += `<h3>${address}</h3>`;
-        html += `<p>交易数量: ${txs.length}</p>`;
-        html += `<p>最后活跃: ${lastActive}</p>`;
-        html += `<p>活跃周: ${[...weeks].join(", ")}</p>`;
-
-        if (txs.length > 0) {
-          html += `<table><tr><th>源链</th><th>目标链</th><th>发起时间</th><th>状态</th></tr>`;
-          txs.forEach(tx => {
-            html += `<tr>
-              <td>${tx.srcChainKey}</td>
-              <td>${tx.dstChainKey}</td>
-              <td>${formatDate(tx.created)}</td>
-              <td>${tx.mainStatus}</td>
-            </tr>`;
-          });
-          html += `</table>`;
+          const row = document.createElement('tr');
+          row.innerHTML = `<td>${addr}</td><td>${count}</td><td>${lastActive}</td><td>${[...weeks].join(', ')}</td>`;
+          table.appendChild(row);
+        } catch (err) {
+          const row = document.createElement('tr');
+          row.innerHTML = `<td>${addr}</td><td colspan="3">查询失败</td>`;
+          table.appendChild(row);
         }
       }
 
-      resultDiv.innerHTML = html;
+      resultsDiv.innerHTML = '';
+      resultsDiv.appendChild(table);
     }
   </script>
 </body>
