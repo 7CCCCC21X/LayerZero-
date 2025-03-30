@@ -23,6 +23,7 @@
 
   <script>
     const MIN_TIMESTAMP = Math.floor(new Date("2024-10-21").getTime() / 1000);
+    const API_BASE = "https://layer-zero-8po0p25nb-7ccccc21xs-projects.vercel.app/api/proxy?address=";
 
     function getDateKey(timestamp) {
       const date = new Date(timestamp * 1000);
@@ -38,42 +39,59 @@
 
     function getMonthKey(timestamp) {
       const date = new Date(timestamp * 1000);
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // yyyy-mm
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function timeAgo(timestamp) {
+      const now = Date.now();
+      const diff = Math.floor((now - timestamp * 1000) / (1000 * 60 * 60 * 24));
+      return diff === 0 ? '今天' : `${diff}天前`;
+    }
+
+    async function fetchWithRetry(url, retries = 1) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`状态码 ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        if (retries > 0) {
+          console.warn(`请求失败，重试中: ${url}`);
+          return fetchWithRetry(url, retries - 1);
+        } else {
+          throw err;
+        }
+      }
     }
 
     async function query() {
       const addresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
       const resultsDiv = document.getElementById('results');
-      resultsDiv.innerHTML = '查询中...';
+      resultsDiv.innerHTML = '';
 
       const table = document.createElement('table');
       table.innerHTML = `<tr><th>地址</th><th>交易数</th><th>最后活跃</th><th>日活</th><th>周活</th><th>月活</th></tr>`;
+      resultsDiv.appendChild(table);
 
       for (const addr of addresses) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td colspan="6">查询中：${addr}</td>`;
+        table.appendChild(row);
         try {
-          const res = await fetch(`https://layer-zero-8po0p25nb-7ccccc21xs-projects.vercel.app/api/proxy?address=${addr}`);
-          const json = await res.json();
+          const json = await fetchWithRetry(`${API_BASE}${addr}`, 1);
           const messages = (json.result?.data?.messages || []).filter(m => m.created >= MIN_TIMESTAMP);
 
           const count = messages.length;
-          const lastActive = messages[0] ? new Date(messages[0].created * 1000).toLocaleString() : '-';
+          const lastActive = messages.length > 0 ? timeAgo(messages[0].created) : '-';
 
           const daySet = new Set(messages.map(m => getDateKey(m.created)));
           const weekSet = new Set(messages.map(m => getWeekKey(m.created)));
           const monthSet = new Set(messages.map(m => getMonthKey(m.created)));
 
-          const row = document.createElement('tr');
           row.innerHTML = `<td>${addr}</td><td>${count}</td><td>${lastActive}</td><td>${daySet.size}</td><td>${weekSet.size}</td><td>${monthSet.size}</td>`;
-          table.appendChild(row);
         } catch (err) {
-          const row = document.createElement('tr');
-          row.innerHTML = `<td>${addr}</td><td colspan="5">查询失败</td>`;
-          table.appendChild(row);
+          row.innerHTML = `<td>${addr}</td><td colspan="5" style="color:red;">查询失败，请稍后重试</td>`;
         }
       }
-
-      resultsDiv.innerHTML = '';
-      resultsDiv.appendChild(table);
     }
   </script>
 </body>
