@@ -17,11 +17,7 @@
     }
     button:hover { background-color: #45a049; }
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    td, th {
-      border: 1px solid #ddd;
-      padding: 8px;
-      text-align: center;
-    }
+    td, th { border: 1px solid #ddd; padding: 8px; text-align: center; }
     th.sortable:hover { background: #eee; cursor: pointer; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     input[type="checkbox"] { transform: scale(1.2); }
@@ -46,7 +42,7 @@
   </style>
 </head>
 <body>
-  <h2>LayerZero 数据（支持批量地址）</h2>
+  <h2>LayerZero 数据查询（支持批量地址）</h2>
   <p>每行输入一个钱包地址：</p>
   <textarea id="addresses"></textarea><br>
   起始时间（默认2024-09-21）：<input type="date" id="startDate" value="2024-09-21" /><br><br>
@@ -105,7 +101,7 @@
         document.getElementById('results').innerHTML = '';
         const table = document.createElement('table');
         table.innerHTML = `<thead><tr>
-          <th>#</th>
+          <th class="sortable" onclick="sortTable('index')">#</th>
           <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
           <th>地址</th>
           <th class="sortable" onclick="sortTable('count')">交易数</th>
@@ -205,8 +201,13 @@
       const rows = [...originalData].sort((a, b) =>
         asc ? a[field] - b[field] : b[field] - a[field]
       );
+
       tbody.innerHTML = '';
-      rows.forEach(d => tbody.appendChild(d.row));
+      rows.forEach((d, i) => {
+        d.index = i + 1;
+        d.row.querySelector("td").textContent = d.index;
+        tbody.appendChild(d.row);
+      });
 
       document.querySelectorAll("th.sortable").forEach(th => {
         th.textContent = th.textContent.replace(/[\u25B2\u25BC]/g, '');
@@ -217,6 +218,7 @@
     }
 
     const fieldMap = {
+      index: '#',
       count: '交易数',
       last: '最后活跃',
       day: '日',
@@ -240,8 +242,10 @@
       const resultsDiv = document.getElementById('results');
       const table = document.createElement('table');
       table.innerHTML = `<thead><tr>
-        <th>#</th><th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
-        <th>地址</th><th class="sortable" onclick="sortTable('count')">交易数</th>
+        <th class="sortable" onclick="sortTable('index')">#</th>
+        <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
+        <th>地址</th>
+        <th class="sortable" onclick="sortTable('count')">交易数</th>
         <th class="sortable" onclick="sortTable('last')">最后活跃</th>
         <th class="sortable" onclick="sortTable('day')">日</th>
         <th class="sortable" onclick="sortTable('week')">周</th>
@@ -267,7 +271,7 @@
           updateSelectAllBox();
         });
         tbody.appendChild(row);
-        return { ...d, row };
+        return { ...d, row, index: i + 1 };
       });
 
       updateSelectAllBox();
