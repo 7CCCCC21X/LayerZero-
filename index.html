@@ -31,6 +31,7 @@
   <br><br>
   <button onclick="query()">查询所有</button>
   <button onclick="query(true)">仅查询选中地址</button>
+  <button onclick="clearAll()">清空所有数据</button>
   <div id="progress"><div id="bar">0%</div></div>
   <div id="results"></div>
 
@@ -80,9 +81,15 @@
       localStorage.setItem('lz_addresses', inputAddresses.join('\n'));
       localStorage.setItem('lz_startDate', start);
 
-      const addresses = onlySelected && originalData.length
-        ? originalData.filter(row => row.checked).map(row => row.address)
-        : inputAddresses;
+      let addresses;
+      if (onlySelected) {
+        addresses = originalData.filter(row => {
+          const cb = row.row.querySelector("input[type=checkbox]");
+          return cb && cb.checked;
+        }).map(row => row.address);
+      } else {
+        addresses = inputAddresses;
+      }
 
       const resultsDiv = document.getElementById('results');
       resultsDiv.innerHTML = '';
@@ -119,7 +126,7 @@
 
           row.innerHTML = `
             <td>${i + 1}</td>
-            <td><input type="checkbox" ${onlySelected ? "checked" : ""}></td>
+            <td><input type="checkbox"></td>
             <td><a href="https://layerzeroscan.com/address/${addr}" target="_blank">${addr}</a></td>
             <td>${count}</td>
             <td>${lastActive}</td>
@@ -127,6 +134,11 @@
             <td>${weekSet.size}</td>
             <td>${monthSet.size}</td>
           `;
+
+          row.querySelector("input[type=checkbox]").addEventListener("change", () => {
+            const item = originalData.find(x => x.address === addr);
+            if (item) item.checked = row.querySelector("input[type=checkbox]").checked;
+          });
 
           if (!onlySelected) {
             originalData.push({
@@ -148,6 +160,7 @@
 
         updateProgress(i + 1, addresses.length);
       }
+
       saveDataToCache();
     }
 
@@ -174,11 +187,56 @@
     }
 
     function saveDataToCache() {
-      const selected = originalData.map((d, i) => ({
+      const dataToSave = originalData.map(d => ({
         ...d,
-        checked: d.row.querySelector('input[type="checkbox"]').checked
+        checked: d.row.querySelector("input[type=checkbox]").checked
       }));
-      localStorage.setItem('lz_cached', JSON.stringify(selected));
+      localStorage.setItem('lz_data', JSON.stringify(dataToSave));
+    }
+
+    function restoreFromCache() {
+      const cached = localStorage.getItem('lz_data');
+      if (!cached) return;
+
+      const restored = JSON.parse(cached);
+      const resultsDiv = document.getElementById('results');
+      const table = document.createElement('table');
+      table.innerHTML = `<thead><tr>
+        <th>#</th><th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
+        <th>地址</th><th class="sortable" onclick="sortTable('count')">交易数</th>
+        <th class="sortable" onclick="sortTable('last')">最后活跃</th>
+        <th class="sortable" onclick="sortTable('day')">日</th>
+        <th class="sortable" onclick="sortTable('week')">周</th>
+        <th class="sortable" onclick="sortTable('month')">月</th>
+      </tr></thead><tbody id="tbody"></tbody>`;
+      resultsDiv.appendChild(table);
+      const tbody = table.querySelector("tbody");
+
+      originalData = restored.map((d, i) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${i + 1}</td>
+          <td><input type="checkbox" ${d.checked ? "checked" : ""}></td>
+          <td><a href="https://layerzeroscan.com/address/${d.address}" target="_blank">${d.address}</a></td>
+          <td>${d.count}</td>
+          <td>${d.last === 9999 ? '-' : `${d.last}天前`}</td>
+          <td>${d.day}</td>
+          <td>${d.week}</td>
+          <td>${d.month}</td>
+        `;
+        row.querySelector("input[type=checkbox]").addEventListener("change", () => {
+          d.checked = row.querySelector("input[type=checkbox]").checked;
+        });
+        tbody.appendChild(row);
+        return { ...d, row };
+      });
+    }
+
+    function clearAll() {
+      localStorage.clear();
+      document.getElementById('addresses').value = '';
+      document.getElementById('results').innerHTML = '';
+      updateProgress(0, 1);
     }
 
     window.onload = () => {
@@ -186,6 +244,7 @@
       const start = localStorage.getItem('lz_startDate');
       if (saved) document.getElementById('addresses').value = saved;
       if (start) document.getElementById('startDate').value = start;
+      restoreFromCache();
     };
   </script>
 </body>
