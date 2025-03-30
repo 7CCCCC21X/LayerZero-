@@ -74,95 +74,96 @@
       }
     }
 
-    async function query(onlySelected = false) {
-      const start = document.getElementById('startDate').value || "2024-09-21";
-      const MIN_TIMESTAMP = Math.floor(new Date(start).getTime() / 1000);
-      const inputAddresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
-      localStorage.setItem('lz_addresses', inputAddresses.join('\n'));
-      localStorage.setItem('lz_startDate', start);
+ async function query(onlySelected = false) {
+  const start = document.getElementById('startDate').value || "2024-09-21";
+  const MIN_TIMESTAMP = Math.floor(new Date(start).getTime() / 1000);
+  const inputAddresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
+  localStorage.setItem('lz_addresses', inputAddresses.join('\n'));
+  localStorage.setItem('lz_startDate', start);
 
-      let addresses;
-      if (onlySelected) {
-        addresses = originalData.filter(row => {
-          const cb = row.row.querySelector("input[type=checkbox]");
-          return cb && cb.checked;
-        }).map(row => row.address);
-      } else {
-        addresses = inputAddresses;
+  let addresses, rowsToUpdate = [];
+  if (onlySelected) {
+    // 保留页面已有表格，只更新勾选的行
+    rowsToUpdate = originalData.filter(row => {
+      const cb = row.row.querySelector("input[type=checkbox]");
+      return cb && cb.checked;
+    });
+    addresses = rowsToUpdate.map(r => r.address);
+  } else {
+    // 全部重新查询并构建表格
+    addresses = inputAddresses;
+    originalData = [];
+    document.getElementById('results').innerHTML = '';
+    const table = document.createElement('table');
+    table.innerHTML = `<thead><tr>
+      <th>#</th>
+      <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
+      <th>地址</th>
+      <th class="sortable" onclick="sortTable('count')">交易数</th>
+      <th class="sortable" onclick="sortTable('last')">最后活跃</th>
+      <th class="sortable" onclick="sortTable('day')">日</th>
+      <th class="sortable" onclick="sortTable('week')">周</th>
+      <th class="sortable" onclick="sortTable('month')">月</th>
+    </tr></thead><tbody id="tbody"></tbody>`;
+    document.getElementById('results').appendChild(table);
+    rowsToUpdate = addresses.map((addr, i) => {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox"></td><td colspan="6" class="loading">加载中：${addr}</td>`;
+      table.querySelector("tbody").appendChild(row);
+      return { address: addr, row, index: i + 1 };
+    });
+  }
+
+  for (let i = 0; i < rowsToUpdate.length; i++) {
+    const { address: addr, row, index } = rowsToUpdate[i];
+    row.innerHTML = `<td>${index}</td><td><input type="checkbox" checked></td><td colspan="6" class="loading">加载中：${addr}</td>`;
+
+    try {
+      const json = await fetchWithRetry(`${API_BASE}${addr}`, 1);
+      const messages = (json.result?.data?.messages || []).filter(m => m.created >= MIN_TIMESTAMP);
+      const count = messages.length;
+      const lastActive = count > 0 ? timeAgo(messages[0].created) : '-';
+      const daySet = new Set(messages.map(m => getDateKey(m.created)));
+      const weekSet = new Set(messages.map(m => getWeekKey(m.created)));
+      const monthSet = new Set(messages.map(m => getMonthKey(m.created)));
+
+      row.innerHTML = `
+        <td>${index}</td>
+        <td><input type="checkbox" checked></td>
+        <td><a href="https://layerzeroscan.com/address/${addr}" target="_blank">${addr}</a></td>
+        <td>${count}</td>
+        <td>${lastActive}</td>
+        <td>${daySet.size}</td>
+        <td>${weekSet.size}</td>
+        <td>${monthSet.size}</td>
+      `;
+
+      let target = originalData.find(d => d.address === addr);
+      if (!target) {
+        target = { address: addr };
+        originalData.push(target);
       }
+      Object.assign(target, {
+        index,
+        checked: true,
+        count,
+        last: lastActive === '-' ? 9999 : parseInt(lastActive),
+        day: daySet.size,
+        week: weekSet.size,
+        month: monthSet.size,
+        row
+      });
 
-      const resultsDiv = document.getElementById('results');
-      resultsDiv.innerHTML = '';
-      const table = document.createElement('table');
-      table.innerHTML = `<thead><tr>
-        <th>#</th>
-        <th><input type="checkbox" id="selectAll" onchange="toggleAll(this)"></th>
-        <th>地址</th>
-        <th class="sortable" onclick="sortTable('count')">交易数</th>
-        <th class="sortable" onclick="sortTable('last')">最后活跃</th>
-        <th class="sortable" onclick="sortTable('day')">日</th>
-        <th class="sortable" onclick="sortTable('week')">周</th>
-        <th class="sortable" onclick="sortTable('month')">月</th>
-      </tr></thead><tbody id="tbody"></tbody>`;
-      resultsDiv.appendChild(table);
-
-      const tbody = table.querySelector("tbody");
-      if (!onlySelected) originalData = [];
-
-      for (let i = 0; i < addresses.length; i++) {
-        const addr = addresses[i];
-        const row = document.createElement('tr');
-        row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox"></td><td colspan="6" class="loading">加载中：${addr}</td>`;
-        tbody.appendChild(row);
-
-        try {
-          const json = await fetchWithRetry(`${API_BASE}${addr}`, 1);
-          const messages = (json.result?.data?.messages || []).filter(m => m.created >= MIN_TIMESTAMP);
-          const count = messages.length;
-          const lastActive = count > 0 ? timeAgo(messages[0].created) : '-';
-          const daySet = new Set(messages.map(m => getDateKey(m.created)));
-          const weekSet = new Set(messages.map(m => getWeekKey(m.created)));
-          const monthSet = new Set(messages.map(m => getMonthKey(m.created)));
-
-          row.innerHTML = `
-            <td>${i + 1}</td>
-            <td><input type="checkbox"></td>
-            <td><a href="https://layerzeroscan.com/address/${addr}" target="_blank">${addr}</a></td>
-            <td>${count}</td>
-            <td>${lastActive}</td>
-            <td>${daySet.size}</td>
-            <td>${weekSet.size}</td>
-            <td>${monthSet.size}</td>
-          `;
-
-          row.querySelector("input[type=checkbox]").addEventListener("change", () => {
-            const item = originalData.find(x => x.address === addr);
-            if (item) item.checked = row.querySelector("input[type=checkbox]").checked;
-          });
-
-          if (!onlySelected) {
-            originalData.push({
-              index: i + 1,
-              address: addr,
-              checked: false,
-              count,
-              last: lastActive === '-' ? 9999 : parseInt(lastActive),
-              day: daySet.size,
-              week: weekSet.size,
-              month: monthSet.size,
-              row
-            });
-          }
-
-        } catch (e) {
-          row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox"></td><td>${addr}</td><td colspan="5" style="color:red;">查询失败</td>`;
-        }
-
-        updateProgress(i + 1, addresses.length);
-      }
-
-      saveDataToCache();
+    } catch (e) {
+      row.innerHTML = `<td>${index}</td><td><input type="checkbox"></td><td>${addr}</td><td colspan="5" style="color:red;">查询失败</td>`;
     }
+
+    updateProgress(i + 1, rowsToUpdate.length);
+  }
+
+  saveDataToCache();
+}
+
 
     function toggleAll(box) {
       document.querySelectorAll("tbody input[type='checkbox']").forEach(cb => cb.checked = box.checked);
