@@ -22,10 +22,23 @@
   <div id="results"></div>
 
   <script>
-    function getWeek(timestamp) {
+    const MIN_TIMESTAMP = Math.floor(new Date("2024-10-21").getTime() / 1000);
+
+    function getDateKey(timestamp) {
       const date = new Date(timestamp * 1000);
-      const onejan = new Date(date.getFullYear(), 0, 1);
-      return `${date.getFullYear()} 第${Math.ceil((((date - onejan) / 86400000) + onejan.getDay() + 1) / 7)}周`;
+      return date.toISOString().split("T")[0]; // yyyy-mm-dd
+    }
+
+    function getWeekKey(timestamp) {
+      const date = new Date(timestamp * 1000);
+      const firstDay = new Date(date.getFullYear(), 0, 1);
+      const dayOfYear = Math.floor((date - firstDay) / (24 * 60 * 60 * 1000));
+      return `${date.getFullYear()}-W${Math.ceil((dayOfYear + firstDay.getDay() + 1) / 7)}`;
+    }
+
+    function getMonthKey(timestamp) {
+      const date = new Date(timestamp * 1000);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; // yyyy-mm
     }
 
     async function query() {
@@ -34,24 +47,27 @@
       resultsDiv.innerHTML = '查询中...';
 
       const table = document.createElement('table');
-      table.innerHTML = `<tr><th>地址</th><th>交易数量</th><th>最后活跃</th><th>活跃周数</th></tr>`;
+      table.innerHTML = `<tr><th>地址</th><th>交易数</th><th>最后活跃</th><th>日活</th><th>周活</th><th>月活</th></tr>`;
 
       for (const addr of addresses) {
         try {
           const res = await fetch(`https://layer-zero-8po0p25nb-7ccccc21xs-projects.vercel.app/api/proxy?address=${addr}`);
           const json = await res.json();
-          const messages = json.result?.data?.messages || [];
+          const messages = (json.result?.data?.messages || []).filter(m => m.created >= MIN_TIMESTAMP);
 
           const count = messages.length;
-          const weeks = new Set(messages.map(m => getWeek(m.created)));
           const lastActive = messages[0] ? new Date(messages[0].created * 1000).toLocaleString() : '-';
 
+          const daySet = new Set(messages.map(m => getDateKey(m.created)));
+          const weekSet = new Set(messages.map(m => getWeekKey(m.created)));
+          const monthSet = new Set(messages.map(m => getMonthKey(m.created)));
+
           const row = document.createElement('tr');
-          row.innerHTML = `<td>${addr}</td><td>${count}</td><td>${lastActive}</td><td>${[...weeks].join(', ')}</td>`;
+          row.innerHTML = `<td>${addr}</td><td>${count}</td><td>${lastActive}</td><td>${daySet.size}</td><td>${weekSet.size}</td><td>${monthSet.size}</td>`;
           table.appendChild(row);
         } catch (err) {
           const row = document.createElement('tr');
-          row.innerHTML = `<td>${addr}</td><td colspan="3">查询失败</td>`;
+          row.innerHTML = `<td>${addr}</td><td colspan="5">查询失败</td>`;
           table.appendChild(row);
         }
       }
