@@ -4,13 +4,22 @@
   <meta charset="UTF-8" />
   <title>LayerZero 批量查询</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    body { font-family: sans-serif; padding: 20px; max-width: 1000px; margin: auto; }
     textarea { width: 100%; height: 120px; }
-    button { margin: 10px 0; padding: 10px 20px; }
+    button { margin: 10px 10px 10px 0; padding: 10px 20px; }
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    td, th { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    td, th { border: 1px solid #ddd; padding: 8px; text-align: center; cursor: default; }
+    th.sortable:hover { background: #eee; cursor: pointer; }
     tr:nth-child(even) { background-color: #f9f9f9; }
     input[type="checkbox"] { transform: scale(1.2); }
+    #progress { margin-top: 10px; height: 16px; background: #f3f3f3; border: 1px solid #ccc; }
+    #bar { height: 100%; width: 0%; background: #4caf50; text-align: center; color: white; font-size: 12px; }
+    .loading { color: #888; animation: fade 1s infinite; }
+    @keyframes fade {
+      0% { opacity: 0.2; }
+      50% { opacity: 1; }
+      100% { opacity: 0.2; }
+    }
   </style>
 </head>
 <body>
@@ -18,35 +27,35 @@
   <p>每行输入一个钱包地址：</p>
   <textarea id="addresses"></textarea>
   <br>
-  <button onclick="query()">查询</button>
-
+  起始时间（默认2024-09-21）：<input type="date" id="startDate" value="2024-09-21" />
+  <br><br>
+  <button onclick="query()">查询所有</button>
+  <button onclick="query(true)">仅查询选中地址</button>
+  <div id="progress"><div id="bar">0%</div></div>
   <div id="results"></div>
 
   <script>
-    const MIN_TIMESTAMP = Math.floor(new Date("2024-10-21").getTime() / 1000);
     const API_BASE = "https://layer-zero-8po0p25nb-7ccccc21xs-projects.vercel.app/api/proxy?address=";
+    let originalData = [];
 
-    function getDateKey(timestamp) {
-      const date = new Date(timestamp * 1000);
-      return date.toISOString().split("T")[0];
+    function getDateKey(ts) {
+      return new Date(ts * 1000).toISOString().split("T")[0];
     }
 
-    function getWeekKey(timestamp) {
-      const date = new Date(timestamp * 1000);
-      const firstDay = new Date(date.getFullYear(), 0, 1);
-      const dayOfYear = Math.floor((date - firstDay) / (24 * 60 * 60 * 1000));
-      return `${date.getFullYear()}-W${Math.ceil((dayOfYear + firstDay.getDay() + 1) / 7)}`;
+    function getWeekKey(ts) {
+      const d = new Date(ts * 1000), f = new Date(d.getFullYear(), 0, 1);
+      const day = Math.floor((d - f) / 86400000);
+      return `${d.getFullYear()}-W${Math.ceil((day + f.getDay() + 1) / 7)}`;
     }
 
-    function getMonthKey(timestamp) {
-      const date = new Date(timestamp * 1000);
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    function getMonthKey(ts) {
+      const d = new Date(ts * 1000);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     }
 
-    function timeAgo(timestamp) {
-      const now = Date.now();
-      const diff = Math.floor((now - timestamp * 1000) / (1000 * 60 * 60 * 24));
-      return diff === 0 ? '今天' : `${diff}天前`;
+    function timeAgo(ts) {
+      const days = Math.floor((Date.now() - ts * 1000) / (1000 * 60 * 60 * 24));
+      return days === 0 ? '今天' : `${days}天前`;
     }
 
     async function fetchWithRetry(url, retries = 1) {
@@ -54,38 +63,52 @@
         const res = await fetch(url);
         if (!res.ok) throw new Error(`状态码 ${res.status}`);
         return await res.json();
-      } catch (err) {
+      } catch (e) {
         if (retries > 0) {
-          console.warn(`请求失败，准备重试...`);
-          await new Promise(resolve => setTimeout(resolve, 30000)); // 等待 30 秒
+          await new Promise(r => setTimeout(r, 30000));
           return fetchWithRetry(url, retries - 1);
         } else {
-          throw err;
+          throw e;
         }
       }
     }
 
-    async function query() {
-      const addresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
+    async function query(onlySelected = false) {
+      const start = document.getElementById('startDate').value || "2024-09-21";
+      const MIN_TIMESTAMP = Math.floor(new Date(start).getTime() / 1000);
+      const inputAddresses = document.getElementById('addresses').value.trim().split('\n').map(a => a.trim()).filter(Boolean);
+      const addresses = onlySelected && originalData.length
+        ? originalData.filter(row => row.checked).map(row => row.address)
+        : inputAddresses;
+
       const resultsDiv = document.getElementById('results');
       resultsDiv.innerHTML = '';
-
       const table = document.createElement('table');
-      table.innerHTML = `<tr><th>#</th><th>选中</th><th>地址</th><th>交易数</th><th>最后活跃</th><th>日活</th><th>周活</th><th>月活</th></tr>`;
+      table.innerHTML = `<thead><tr>
+        <th>#</th><th>选中</th><th>地址</th>
+        <th class="sortable" onclick="sortTable('count')">交易数</th>
+        <th class="sortable" onclick="sortTable('last')">最后活跃</th>
+        <th class="sortable" onclick="sortTable('day')">日</th>
+        <th class="sortable" onclick="sortTable('week')">周</th>
+        <th class="sortable" onclick="sortTable('month')">月</th>
+      </tr></thead><tbody id="tbody"></tbody>`;
       resultsDiv.appendChild(table);
+
+      const tbody = table.querySelector("tbody");
+      originalData = [];
 
       for (let i = 0; i < addresses.length; i++) {
         const addr = addresses[i];
         const row = document.createElement('tr');
-        row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox" checked></td><td colspan="6">加载中：${addr}</td>`;
-        table.appendChild(row);
+        row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox" checked></td><td colspan="6" class="loading">加载中：${addr}</td>`;
+        tbody.appendChild(row);
 
         try {
           const json = await fetchWithRetry(`${API_BASE}${addr}`, 1);
           const messages = (json.result?.data?.messages || []).filter(m => m.created >= MIN_TIMESTAMP);
 
           const count = messages.length;
-          const lastActive = messages.length > 0 ? timeAgo(messages[0].created) : '-';
+          const lastActive = count > 0 ? timeAgo(messages[0].created) : '-';
           const daySet = new Set(messages.map(m => getDateKey(m.created)));
           const weekSet = new Set(messages.map(m => getWeekKey(m.created)));
           const monthSet = new Set(messages.map(m => getMonthKey(m.created)));
@@ -93,22 +116,54 @@
           row.innerHTML = `
             <td>${i + 1}</td>
             <td><input type="checkbox" checked></td>
-            <td>${addr}</td>
+            <td><a href="https://layerzeroscan.com/address/${addr}" target="_blank">${addr}</a></td>
             <td>${count}</td>
             <td>${lastActive}</td>
             <td>${daySet.size}</td>
             <td>${weekSet.size}</td>
             <td>${monthSet.size}</td>
           `;
-        } catch (err) {
-          row.innerHTML = `
-            <td>${i + 1}</td>
-            <td><input type="checkbox"></td>
-            <td>${addr}</td>
-            <td colspan="5" style="color:red;">查询失败，跳过</td>
-          `;
+
+          originalData.push({
+            index: i + 1,
+            address: addr,
+            checked: true,
+            count,
+            last: lastActive === '-' ? 9999 : parseInt(lastActive),
+            day: daySet.size,
+            week: weekSet.size,
+            month: monthSet.size,
+            row
+          });
+        } catch (e) {
+          row.innerHTML = `<td>${i + 1}</td><td><input type="checkbox"></td><td>${addr}</td><td colspan="5" style="color:red;">查询失败</td>`;
         }
+
+        updateProgress(i + 1, addresses.length);
       }
+    }
+
+    function updateProgress(done, total) {
+      const bar = document.getElementById('bar');
+      const percent = Math.round((done / total) * 100);
+      bar.style.width = percent + '%';
+      bar.textContent = `${done}/${total} (${percent}%)`;
+    }
+
+    function sortTable(field) {
+      const tbody = document.querySelector("#tbody");
+      const rows = Array.from(originalData);
+      const asc = !sortTable.last || sortTable.last.field !== field || !sortTable.last.asc;
+      sortTable.last = { field, asc };
+
+      rows.sort((a, b) => {
+        const diff = a[field] - b[field];
+        return asc ? diff : -diff;
+      });
+
+      rows.forEach((d, i) => {
+        tbody.appendChild(d.row);
+      });
     }
   </script>
 </body>
